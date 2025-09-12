@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
 import { postsService, engagementService } from '../services/api.js'
 import { getCoverImageUrl, getImageFallback } from '../utils/imageUtils.js'
 import { getCategoryColorClasses } from '../utils/colorUtils.js'
@@ -53,15 +52,11 @@ const PostPage = () => {
         }
         setViewCount(postData.views || 0)
 
-        // Track view if not already viewed in this session
+        // Track view once per session (atomic RPC under the hood)
         const viewedPosts = JSON.parse(sessionStorage.getItem('viewedPosts') || '[]')
         if (!viewedPosts.includes(postData.id)) {
-          // Increment view count
-          await postsService.incrementViews(postData.id)
-          
-          // Update local state
-          setViewCount(prev => prev + 1)
-          
+          const newCount = await postsService.incrementViews(postData.id)
+          setViewCount(prev => (typeof newCount === 'number' ? newCount : prev + 1))
           // Mark as viewed in session
           viewedPosts.push(postData.id)
           sessionStorage.setItem('viewedPosts', JSON.stringify(viewedPosts))
@@ -144,18 +139,21 @@ const PostPage = () => {
       }
 
       // Notify backend (if configured) to toggle like count
-      // If service returns a numeric count, reconcile UI to server state
-      engagementService
-        .toggleLike(post.id, isCurrentlyLiked)
-        .then((maybeCount) => {
-          if (typeof maybeCount === 'number' && Number.isFinite(maybeCount)) {
-            setLikeCount(maybeCount)
-          }
-        })
-        .catch((err) => {
-          console.warn('toggleLike failed; keeping optimistic UI state', err)
-          setToast('Unable to save like right now. Your change may not persist.')
-        })
+      try {
+        const maybeCount = await engagementService.toggleLike(post.id, isCurrentlyLiked)
+        // Reconcile if service returned a number
+        if (typeof maybeCount === 'number' && Number.isFinite(maybeCount)) {
+          setLikeCount(maybeCount)
+        }
+        // Always refresh from server to ensure accuracy
+        const fresh = await engagementService.getLikes(post.id)
+        if (typeof fresh === 'number' && Number.isFinite(fresh)) {
+          setLikeCount(fresh)
+        }
+      } catch (err) {
+        console.warn('toggleLike failed; keeping optimistic UI state', err)
+        setToast('Unable to save like right now. Your change may not persist.')
+      }
     } catch (error) {
       console.error('Error toggling like:', error)
     }

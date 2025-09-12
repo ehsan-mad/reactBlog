@@ -190,7 +190,7 @@ export const postsService = {
   /**
    * Update post view count
    * @param {string} postId - The ID of the post to update
-   * @returns {Promise<boolean>} Success status
+   * @returns {Promise<number|true>} New view count when available (RPC), or true in mock mode
    */
   async incrementViews(postId) {
     if (!isSupabaseConfigured()) {
@@ -199,26 +199,14 @@ export const postsService = {
     }
 
     try {
-      // First get the current view count
-      const { data: post, error: fetchError } = await supabase
-        .from('posts')
-        .select('views')
-        .eq('id', postId)
-        .single()
-      
-      if (fetchError) throw fetchError
-      
-      // Then update with incremented value
-      const { error: updateError } = await supabase
-        .from('posts')
-        .update({ views: (post.views || 0) + 1 })
-        .eq('id', postId)
-      
-      if (updateError) throw updateError
-      return true
+      // Prefer atomic RPC to avoid RLS issues and race conditions
+      const { data, error } = await supabase.rpc('increment_post_views', { post_id: postId })
+      if (error) throw error
+      // RPC returns the new view count; fall back to true if not provided
+      return (typeof data === 'number' && Number.isFinite(data)) ? data : true
     } catch (error) {
       console.error(`Error incrementing views for post "${postId}":`, error)
-      return false
+      return true
     }
   },
 
@@ -300,14 +288,16 @@ export const engagementService = {
           throw delError;
         }
       } else {
-        // Like = insert like row (ignore unique conflict if already liked)
-        const { error: insError } = await supabase
+        // Like = upsert like row (ignore conflict if already liked)
+        const { error: upsertError } = await supabase
           .from('likes')
-          .insert([{ post_id: postId, user_id: userId }]);
-        // If unique violation, we can ignore it safely
-        if (insError && insError.code !== '23505') {
-          console.warn('Supabase insert like error:', insError);
-          throw insError;
+          .upsert(
+            [{ post_id: postId, user_id: userId }],
+            { onConflict: 'post_id,user_id', ignoreDuplicates: true }
+          );
+        if (upsertError) {
+          console.warn('Supabase upsert like error:', upsertError);
+          throw upsertError;
         }
       }
 
@@ -350,21 +340,23 @@ export const engagementService = {
     }
 
     try {
-      // First try posts.likes (as defined in your DB and sample data)
+      // Prefer an exact row count from likes (immediately consistent after toggles)
+      const { count, error: countError } = await supabase
+        .from('likes')
+        .select('id', { count: 'exact', head: true })
+        .eq('post_id', postId);
+      if (!countError && typeof count === 'number') {
+        return count;
+      }
+
+      // Fallback: read posts.likes (trigger-synced aggregate)
       const { data, error } = await supabase
         .from('posts')
         .select('likes')
         .eq('id', postId)
         .single();
       if (!error && data) return data.likes || 0;
-
-      // Fallback: count likes table rows
-      const { count, error: countError } = await supabase
-        .from('likes')
-        .select('id', { count: 'exact', head: true })
-        .eq('post_id', postId);
-      if (countError) throw countError;
-      return typeof count === 'number' ? count : 0;
+      return 0;
     } catch (error) {
       console.error(`Error getting likes for post "${postId}":`, error);
       return 0;

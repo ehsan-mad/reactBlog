@@ -179,8 +179,12 @@ export const usePostEngagement = (post) => {
     if (!post || viewed) return
 
     try {
-      await postsService.incrementViews(post.id)
-      setViewCount(prev => prev + 1)
+      const newCount = await postsService.incrementViews(post.id)
+      if (typeof newCount === 'number' && Number.isFinite(newCount)) {
+        setViewCount(newCount)
+      } else {
+        setViewCount(prev => prev + 1)
+      }
       setViewed(true)
 
       // Store in session storage
@@ -215,6 +219,17 @@ export const usePostEngagement = (post) => {
         localStorage.setItem('likedPosts', JSON.stringify(likedPosts))
         setLiked(true)
         setLikeCount(prev => prev + 1)
+      }
+
+      // Reconcile with authoritative count from backend when available
+      if (typeof newLikeCount === 'number' && Number.isFinite(newLikeCount)) {
+        setLikeCount(newLikeCount)
+      }
+
+      // Always refresh from server (authoritative)
+      const fresh = await engagementService.getLikes(post.id)
+      if (typeof fresh === 'number' && Number.isFinite(fresh)) {
+        setLikeCount(fresh)
       }
     } catch (error) {
       console.error('Error toggling like:', error)

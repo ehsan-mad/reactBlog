@@ -8,6 +8,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Drop existing tables (if needed for clean setup)
 DROP TABLE IF EXISTS public.likes;
+DROP TABLE IF EXISTS public.post_views;
 DROP TABLE IF EXISTS public.posts;
 DROP TABLE IF EXISTS public.categories;
 
@@ -49,6 +50,15 @@ CREATE TABLE likes (
   UNIQUE(post_id, user_id)
 );
 
+-- Optional: Track unique post views per user to avoid inflating counts
+CREATE TABLE IF NOT EXISTS post_views (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  post_id UUID REFERENCES posts(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  UNIQUE(post_id, user_id)
+);
+
 -- =========================================
 -- INDEXES (for performance)
 -- =========================================
@@ -59,6 +69,8 @@ CREATE INDEX posts_slug_idx ON posts(slug);
 CREATE INDEX categories_slug_idx ON categories(slug);
 CREATE INDEX likes_post_id_idx ON likes(post_id);
 CREATE INDEX likes_user_id_idx ON likes(user_id);
+CREATE INDEX IF NOT EXISTS post_views_post_id_idx ON post_views(post_id);
+CREATE INDEX IF NOT EXISTS post_views_user_id_idx ON post_views(user_id);
 
 -- =========================================
 -- RPC FUNCTIONS (for atomic updates)
@@ -66,7 +78,10 @@ CREATE INDEX likes_user_id_idx ON likes(user_id);
 
 -- Function to increment post views atomically
 CREATE OR REPLACE FUNCTION increment_post_views(post_id UUID)
-RETURNS INTEGER AS $$
+RETURNS INTEGER
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   new_count INTEGER;
 BEGIN
@@ -77,7 +92,10 @@ $$ LANGUAGE plpgsql;
 
 -- Function to increment post likes atomically
 CREATE OR REPLACE FUNCTION increment_post_likes(post_id UUID)
-RETURNS INTEGER AS $$
+RETURNS INTEGER
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   new_count INTEGER;
 BEGIN
@@ -88,7 +106,10 @@ $$ LANGUAGE plpgsql;
 
 -- Function to update post like count when likes table changes
 CREATE OR REPLACE FUNCTION update_post_likes_count()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     UPDATE posts SET likes = likes + 1 WHERE id = NEW.post_id;
@@ -107,6 +128,33 @@ RETURNS TRIGGER AS $$
 BEGIN
   NEW.updated_at = timezone('utc'::text, now());
   RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- RPC to track a view once per (post_id, user_id) and increment posts.views atomically
+CREATE OR REPLACE FUNCTION track_post_view(post_id UUID, user_id UUID)
+RETURNS INTEGER
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  already_viewed BOOLEAN;
+  new_count INTEGER;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM post_views WHERE post_views.post_id = track_post_view.post_id AND post_views.user_id = track_post_view.user_id
+  ) INTO already_viewed;
+
+  IF NOT already_viewed THEN
+    INSERT INTO post_views (post_id, user_id) VALUES (track_post_view.post_id, track_post_view.user_id)
+    ON CONFLICT (post_id, user_id) DO NOTHING;
+
+    UPDATE posts SET views = views + 1 WHERE id = track_post_view.post_id RETURNING views INTO new_count;
+    RETURN new_count;
+  ELSE
+    SELECT views INTO new_count FROM posts WHERE id = track_post_view.post_id;
+    RETURN new_count;
+  END IF;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -132,6 +180,7 @@ CREATE TRIGGER update_posts_updated_at
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE post_views ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read access to categories
 CREATE POLICY "Allow public read on categories" ON categories
@@ -152,9 +201,24 @@ CREATE POLICY "Allow users to delete their own likes" ON likes
 CREATE POLICY "Allow public read on likes" ON likes
   FOR SELECT USING (true);
 
+-- Allow public insert/select on post_views; no deletes required for now
+CREATE POLICY "Allow public read on post_views" ON post_views
+  FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on post_views" ON post_views
+  FOR INSERT WITH CHECK (true);
+
 -- =========================================
 -- SAMPLE DATA (Optional)
 -- =========================================
+
+-- Allow anon (public) to execute RPCs for counters
+GRANT EXECUTE ON FUNCTION increment_post_views(UUID) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION increment_post_likes(UUID) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION track_post_view(UUID, UUID) TO anon, authenticated;
+
+-- Explicit table grants (with RLS policies defined above)
+GRANT SELECT, INSERT, DELETE ON public.likes TO anon, authenticated;
+GRANT SELECT, INSERT ON public.post_views TO anon, authenticated;
 
 -- Sample categories
 INSERT INTO categories (id, name, slug) VALUES 
