@@ -1,5 +1,5 @@
 import React from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
 import Header from './components/Header.jsx'
 import Footer from './components/Footer.jsx'
 import HomePage from './pages/HomePage.jsx'
@@ -15,10 +15,25 @@ import { ErrorPage } from './components/ui/ErrorMessage.jsx'
  * - React Router setup for navigation between pages
  * - 404 error page handling
  */
+function VercelAnalyticsTracker() {
+  const location = useLocation()
+  React.useEffect(() => {
+    try {
+      if (window?.va && typeof window.va.track === 'function') {
+        window.va.track('pageview')
+      }
+    } catch {
+      // ignore
+    }
+  }, [location.pathname, location.search, location.hash])
+  return null
+}
+
 function App() {
   return (
     <Router>
       <div className="min-h-screen flex flex-col">
+        <VercelAnalyticsTracker />
         <Header />
         
         <main className="flex-1">
