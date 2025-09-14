@@ -1,0 +1,431 @@
+/**
+ * Enhanced API Service Module
+ * Provides optimized data access with caching and improved error handling
+ */
+
+import { supabase, signInAnonymously } from './supabase.js'
+import { mockCategories, mockPosts } from '../utils/mockData.js'
+import { createCacheableFetch, invalidateCache } from '../utils/dataService.js'
+
+/**
+ * Check if Supabase is properly configured
+ * @returns {boolean} True if Supabase environment variables are set
+ */
+const isSupabaseConfigured = () => {
+  return import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
+}
+
+/**
+ * Categories Service
+ * Manages blog categories data with caching
+ */
+export const categoriesService = {
+  /**
+   * Get all categories for navigation
+   * @returns {Promise<Array>} List of all categories
+   */
+  getAll: createCacheableFetch(
+    async () => {
+      if (!isSupabaseConfigured()) {
+        console.warn('Supabase not configured, using mock data')
+        return mockCategories
+      }
+
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      return data || []
+    },
+    'categories:all',
+    300000, // 5 minutes cache
+    () => mockCategories // Fallback to mock data
+  ),
+
+  /**
+   * Get category by slug
+   * @param {string} slug - The category slug to find
+   * @returns {Promise<Object|null>} Category data or null if not found
+   */
+  getBySlug: createCacheableFetch(
+    async (slug) => {
+      if (!isSupabaseConfigured()) {
+        return mockCategories.find(cat => cat.slug === slug) || null
+      }
+
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('slug', slug)
+        .single()
+
+      if (error) throw error
+      return data
+    },
+    'categories:bySlug',
+    300000, // 5 minutes cache
+    (slug) => mockCategories.find(cat => cat.slug === slug) || null
+  )
+}
+
+/**
+ * Posts Service
+ * Manages blog posts data with caching and optimized queries
+ */
+export const postsService = {
+  /**
+   * Get published posts with pagination
+   * @param {number} limit - Maximum number of posts to fetch
+   * @param {number} offset - Number of posts to skip (for pagination)
+   * @returns {Promise<Array>} List of published posts
+   */
+  getPublished: createCacheableFetch(
+    async (limit = 10, offset = 0) => {
+      if (!isSupabaseConfigured()) {
+        console.warn('Supabase not configured, using mock data')
+        return mockPosts.slice(offset, offset + limit)
+      }
+      
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          categories (*)
+        `)
+        .order('published_at', { ascending: false })
+        .range(offset, offset + limit - 1)
+
+      if (error) throw error
+      return data || []
+    },
+    'posts:published',
+    60000, // 1 minute cache
+    (limit, offset) => mockPosts.slice(offset, offset + limit)
+  ),
+
+  /**
+   * Get a single post by its slug with caching
+   * @param {string} slug - The post slug to find
+   * @returns {Promise<Object|null>} Post data or null if not found
+   */
+  getBySlug: createCacheableFetch(
+    async (slug) => {
+      if (!isSupabaseConfigured()) {
+        return mockPosts.find(post => post.slug === slug) || null
+      }
+
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          categories (*)
+        `)
+        .eq('slug', slug)
+        .single()
+
+      if (error) throw error
+      return data
+    },
+    'posts:bySlug',
+    60000, // 1 minute cache
+    (slug) => mockPosts.find(post => post.slug === slug) || null
+  ),
+
+  /**
+   * Get posts by category with caching
+   * @param {string} categorySlug - The category slug to filter by
+   * @param {number} limit - Maximum number of posts to fetch
+   * @param {number} offset - Number of posts to skip (for pagination)
+   * @returns {Promise<Array>} List of posts in the category
+   */
+  getByCategory: createCacheableFetch(
+    async (categorySlug, limit = 10, offset = 0) => {
+      if (!isSupabaseConfigured()) {
+        // Filter mock posts by category
+        const categoryPosts = mockPosts.filter(post => 
+          post.categories && post.categories.slug === categorySlug
+        )
+        return categoryPosts.slice(offset, offset + limit)
+      }
+
+      try {
+        // First, get the category ID from the slug
+        const { data: category, error: categoryError } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('slug', categorySlug)
+          .single()
+
+        if (categoryError) throw categoryError
+        
+        // Then get posts with that category ID
+        const { data, error } = await supabase
+          .from('posts')
+          .select(`
+            *,
+            categories (*)
+          `)
+          .eq('category_id', category.id)
+          .order('published_at', { ascending: false })
+          .range(offset, offset + limit - 1)
+
+        if (error) throw error
+        return data || []
+      } catch (error) {
+        console.error(`Error fetching posts for category "${categorySlug}":`, error)
+        throw error
+      }
+    },
+    'posts:byCategory',
+    60000, // 1 minute cache
+    (categorySlug, limit, offset) => {
+      // Return mock posts filtered by category
+      const categoryPosts = mockPosts.filter(post => 
+        post.categories && post.categories.slug === categorySlug
+      )
+      return categoryPosts.slice(offset, offset + limit)
+    }
+  ),
+  
+  /**
+   * Update post view count - non-cached as it's a mutation
+   * @param {string} postId - The ID of the post to update
+   * @returns {Promise<number|true>} New view count when available (RPC), or true in mock mode
+   */
+  async incrementViews(postId) {
+    if (!isSupabaseConfigured()) {
+      // In mock mode, just simulate a successful update
+      return true
+    }
+
+    try {
+      // Prefer atomic RPC to avoid RLS issues and race conditions
+      const { data, error } = await supabase.rpc('increment_post_views', { post_id: postId })
+      
+      if (error) throw error
+      
+      // Invalidate relevant caches
+      invalidateCache(`posts:bySlug:["${postId}"]`);
+      invalidateCache('posts:published', true);
+      invalidateCache('posts:byCategory', true);
+      
+      // RPC returns the new view count; fall back to true if not provided
+      return (typeof data === 'number' && Number.isFinite(data)) ? data : true
+    } catch (error) {
+      console.error(`Error incrementing views for post "${postId}":`, error)
+      return true
+    }
+  },
+
+  /**
+   * Get related posts from the same category with caching
+   * @param {string} categoryId - The category ID to fetch related posts from
+   * @param {string} currentPostId - The current post ID to exclude from results
+   * @param {number} limit - Maximum number of related posts to fetch
+   * @returns {Promise<Array>} List of related posts
+   */
+  getRelated: createCacheableFetch(
+    async (categoryId, currentPostId, limit = 3) => {
+      if (!isSupabaseConfigured()) {
+        // Get mock posts from the same category, excluding current post
+        const relatedPosts = mockPosts.filter(post => 
+          post.category_id === categoryId && post.id !== currentPostId
+        )
+        // Randomize order and take the requested limit
+        return relatedPosts
+          .sort(() => Math.random() - 0.5)
+          .slice(0, limit)
+      }
+
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          *,
+          categories (*)
+        `)
+        .eq('category_id', categoryId)
+        .neq('id', currentPostId)
+        .order('published_at', { ascending: false })
+        .limit(limit)
+
+      if (error) throw error
+      return data || []
+    },
+    'posts:related',
+    300000, // 5 minutes cache
+    (categoryId, currentPostId, limit) => {
+      // Get mock posts from the same category, excluding current post
+      const relatedPosts = mockPosts.filter(post => 
+        post.category_id === categoryId && post.id !== currentPostId
+      )
+      // Randomize order and take the requested limit
+      return relatedPosts
+        .sort(() => Math.random() - 0.5)
+        .slice(0, limit)
+    }
+  )
+}
+
+/**
+ * Engagement Service
+ * Manages user interactions with posts (likes, comments, etc.)
+ */
+export const engagementService = {
+  /**
+   * Like a post (add or remove like) - non-cached as it's a mutation
+   * @param {string} postId - The ID of the post to like/unlike
+   * @param {boolean} isLiked - Whether the post is currently liked (to toggle)
+   * @returns {Promise<number|true>} New like count (when available) or true in mock mode
+   */
+  async toggleLike(postId, isLiked) {
+    if (!isSupabaseConfigured()) {
+      // In mock mode, just simulate a successful update
+      return true;
+    }
+
+    try {
+      // Get or create an anonymous/guest user id for likes table
+      const authData = await signInAnonymously();
+      const userId = authData?.user?.id;
+
+      if (!userId) {
+        // As a fallback (should not happen when Supabase is configured), bail out early
+        return true;
+      }
+
+      if (isLiked) {
+        // Unlike = delete the like row for this user/post
+        const { error: delError } = await supabase
+          .from('likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', userId);
+        if (delError) {
+          console.warn('Supabase delete like error:', delError);
+          throw delError;
+        }
+      } else {
+        // Like = upsert like row (ignore conflict if already liked)
+        const { error: upsertError } = await supabase
+          .from('likes')
+          .upsert(
+            [{ post_id: postId, user_id: userId }],
+            { onConflict: 'post_id,user_id', ignoreDuplicates: true }
+          );
+        if (upsertError) {
+          console.warn('Supabase upsert like error:', upsertError);
+          throw upsertError;
+        }
+      }
+
+      // Invalidate relevant caches
+      invalidateCache(`posts:bySlug:["${postId}"]`);
+      invalidateCache('posts:published', true);
+      invalidateCache('posts:byCategory', true);
+      invalidateCache('posts:related', true);
+
+      // Prefer authoritative count from posts.likes (trigger keeps it in sync)
+      const { data: updated, error: fetchUpdatedError } = await supabase
+        .from('posts')
+        .select('likes')
+        .eq('id', postId)
+        .single();
+      if (!fetchUpdatedError && updated) {
+        return updated.likes ?? true;
+      }
+
+      // Fallback: count rows from likes table (works even if trigger missing)
+      const { count, error: countError } = await supabase
+        .from('likes')
+        .select('id', { count: 'exact', head: true })
+        .eq('post_id', postId);
+      if (!countError && typeof count === 'number') {
+        return count;
+      }
+      if (fetchUpdatedError) console.warn('Supabase fetch updated post likes error:', fetchUpdatedError);
+      if (countError) console.warn('Supabase count likes error:', countError);
+      return true;
+    } catch (error) {
+      console.error(`Error toggling like for post "${postId}":`, error);
+      return true; // Keep UI optimistic; optionally handle error in caller
+    }
+  },
+  
+  /**
+   * Get the total number of likes for a post with caching
+   * @param {string} postId - The ID of the post
+   * @returns {Promise<number>} Number of likes
+   */
+  getLikes: createCacheableFetch(
+    async (postId) => {
+      if (!isSupabaseConfigured()) {
+        // Return a random number for mock mode
+        return Math.floor(Math.random() * 50);
+      }
+
+      // Prefer an exact row count from likes (immediately consistent after toggles)
+      const { count, error: countError } = await supabase
+        .from('likes')
+        .select('id', { count: 'exact', head: true })
+        .eq('post_id', postId);
+      if (!countError && typeof count === 'number') {
+        return count;
+      }
+
+      // Fallback: read posts.likes (trigger-synced aggregate)
+      const { data, error } = await supabase
+        .from('posts')
+        .select('likes')
+        .eq('id', postId)
+        .single();
+      if (!error && data) return data.likes || 0;
+      return 0;
+    },
+    'likes:count',
+    30000, // 30 seconds cache
+    () => Math.floor(Math.random() * 50) // Fallback to random number for mock mode
+  ),
+
+  /**
+   * Check if a user has liked a post with short-lived caching
+   * @param {string} postId - The ID of the post
+   * @param {string} userId - The ID of the user
+   * @returns {Promise<boolean>} Whether the user has liked the post
+   */
+  hasLiked: createCacheableFetch(
+    async (postId, userId) => {
+      // If not configured or missing IDs, fall back to localStorage heuristic
+      if (!isSupabaseConfigured() || !postId || !userId) {
+        try {
+          const likedPosts = JSON.parse(localStorage.getItem('likedPosts') || '[]');
+          return likedPosts.includes(postId);
+        } catch {
+          return false;
+        }
+      }
+
+      // Query likes table for existence of a row for this (post_id, user_id)
+      const { data, error } = await supabase
+        .from('likes')
+        .select('id')
+        .eq('post_id', postId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) throw error;
+      return Boolean(data);
+    },
+    'likes:hasLiked',
+    30000, // 30 seconds cache
+    (postId) => {
+      try {
+        const likedPosts = JSON.parse(localStorage.getItem('likedPosts') || '[]');
+        return likedPosts.includes(postId);
+      } catch {
+        return false;
+      }
+    }
+  )
+}

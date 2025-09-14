@@ -2,6 +2,16 @@
 
 A lightweight, performant blog application built with React, Vite, Tailwind CSS, and Supabase. Features a component-based architecture with proper code reusability and modern UI design patterns.
 
+## 📚 Documentation
+
+This project includes comprehensive documentation:
+
+- [Architecture Documentation](./ARCHITECTURE.md): Overview of application architecture
+- [Component Documentation](./COMPONENTS.md): Details on all reusable components
+- [Data Flow Documentation](./DATA_FLOW.md): How data flows through the application
+- [Deployment Guide](./DEPLOYMENT.md): How to deploy the application
+- [Troubleshooting Guide](./TROUBLESHOOTING.md): Common issues and solutions
+
 ## 🏗️ Architecture
 
 **Frontend:** React 19 + Vite + Tailwind CSS  

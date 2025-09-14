@@ -93,7 +93,7 @@ const HomePage = () => {
               Latest Posts
               <span className="absolute -bottom-1 left-0 w-full h-1 bg-gradient-to-r from-black via-gray-500 to-black"></span>
             </h2>
-            <p className="text-gray-600">Stay up to date with our newest content</p>
+            <p className="text-gray-600"></p>
           </div>
 
           {posts.length === 0 && !loading ? (

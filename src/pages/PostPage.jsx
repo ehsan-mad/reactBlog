@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { postsService, engagementService } from '../services/api.js'
-import { getCoverImageUrl, getImageFallback } from '../utils/imageUtils.js'
-import { getCategoryColorClasses } from '../utils/colorUtils.js'
-import PostCard from '../components/ui/PostCard.jsx'
+import { getCoverImageUrl } from '../utils/imageUtils.js'
 import { LoadingPage } from '../components/ui/LoadingSpinner.jsx'
 import { ErrorPage } from '../components/ui/ErrorMessage.jsx'
-import Button from '../components/ui/Button.jsx'
 import Toast from '../components/ui/Toast.jsx'
 import { signInAnonymously } from '../services/supabase.js'
 import Markdown from '../components/ui/Markdown.jsx'
+
+// Import our new reusable components
+import ImageWithFallback from '../components/common/ImageWithFallback.jsx'
+import PostCard from '../components/common/PostCard.jsx'
+import CategoryBadge from '../components/common/CategoryBadge.jsx'
+import LikeButton from '../components/common/LikeButton.jsx'
 
 const PostPage = () => {
   const { slug } = useParams()
@@ -180,70 +183,67 @@ const PostPage = () => {
       {toast && <Toast message={toast} onClose={() => setToast(null)} />}
       {/* Cover Image */}
       {post.cover_path && (
-        <div className="w-full h-64 md:h-96 bg-gray-200 overflow-hidden">
-          <img
+        <div className="w-full h-[400px] md:h-[500px] lg:h-[600px] bg-gray-100 overflow-hidden relative">
+          <ImageWithFallback
             src={getCoverImageUrl(post.cover_path, post.title)}
             alt={post.title}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              e.target.src = getImageFallback();
-            }}
+            className="w-full h-full object-cover object-center shadow-lg"
           />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/20"></div>
         </div>
       )}
 
       {/* Post Content */}
-      <article className="container-main py-8">
-        <div className="max-w-4xl mx-auto">
+      <article className="container-main py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm p-6 sm:p-8 md:p-10">
           {/* Header */}
           <header className="mb-8">
             {/* Category Badge */}
             {post.categories && (
               <div className="mb-4">
-                <span className={`inline-block text-sm font-medium px-3 py-1 rounded-md ${getCategoryColorClasses(post.categories.name)}`}>
-                  {post.categories.name}
-                </span>
+                <CategoryBadge 
+                  category={post.categories} 
+                  size="lg"
+                />
               </div>
             )}
 
             {/* Title */}
-            <h1 className="text-3xl md:text-5xl font-bold text-gray-900 mb-4 leading-tight">
+            <h1 className="text-3xl md:text-4xl lg:text-5xl font-extrabold text-gray-900 mb-6 leading-tight">
               {post.title}
             </h1>
 
             {/* Meta Information */}
-            <div className="flex flex-wrap items-center justify-between text-sm text-gray-600 mb-6">
-              <time dateTime={post.published_at} className="mb-2 md:mb-0">
+            <div className="flex flex-wrap items-center justify-between text-sm text-gray-600 mb-8 border-b border-gray-100 pb-4">
+              <time dateTime={post.published_at} className="mb-2 md:mb-0 flex items-center">
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
                 Published on {formatDate(post.published_at)}
               </time>
 
               {/* Views and Likes */}
               <div className="flex items-center space-x-6">
-                <div className="flex items-center space-x-1">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex items-center space-x-1.5 bg-gray-50 px-3 py-1.5 rounded-full">
+                  <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
-                  <span>{viewCount} views</span>
+                  <span className="font-medium">{viewCount}</span>
                 </div>
 
-                <Button
-                  onClick={handleLike}
-                  variant="ghost"
-                  size="sm"
-                  className={`flex items-center space-x-1 ${liked ? 'text-red-600' : 'text-gray-600'}`}
-                >
-                  <svg className={`w-4 h-4 ${liked ? 'fill-current' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                  </svg>
-                  <span>{likeCount}</span>
-                </Button>
+                <LikeButton
+                  liked={liked}
+                  count={likeCount}
+                  onToggle={handleLike}
+                  size="md"
+                />
               </div>
             </div>
 
             {/* Excerpt */}
             {post.excerpt && (
-              <p className="text-lg text-gray-700 leading-relaxed bg-gray-100 p-4 rounded-lg italic">
+              <p className="text-lg text-gray-700 leading-relaxed bg-gray-50 p-6 rounded-xl italic border-l-4 border-blue-400 mb-8 shadow-sm">
                 {post.excerpt}
               </p>
             )}
@@ -251,17 +251,20 @@ const PostPage = () => {
 
           {/* Content */}
           <div className="prose prose-lg max-w-none mb-12 text-gray-800 leading-relaxed">
-            {post.content && <Markdown>{post.content}</Markdown>}
+            {post.content && <Markdown className="prose-headings:text-gray-900 prose-headings:font-bold prose-a:text-blue-600 prose-a:no-underline hover:prose-a:underline prose-img:rounded-lg prose-img:shadow-md">{post.content}</Markdown>}
           </div>
         </div>
       </article>
 
       {/* Related Posts */}
       {relatedPosts.length > 0 && (
-        <section className="bg-white py-12 border-t border-gray-200">
-          <div className="container-main">
-            <h2 className="text-2xl font-bold text-gray-900 mb-8">More from {post.categories?.name}</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <section className="bg-gray-50 py-16 border-t border-gray-200">
+          <div className="container-main px-4 sm:px-6 lg:px-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-8 flex items-center">
+              <span className="w-8 h-1 bg-blue-500 mr-3 rounded-full"></span>
+              More from {post.categories?.name}
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {relatedPosts.map((relatedPost) => (
                 <PostCard key={relatedPost.id} post={relatedPost} />
               ))}
