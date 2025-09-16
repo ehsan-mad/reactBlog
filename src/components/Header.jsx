@@ -61,6 +61,7 @@ const Header = () => {
       <Link
         to={to}
         className={`nav-link ${baseClasses} ${activeClasses}`}
+        aria-current={isActiveRoute(to) ? 'page' : undefined}
       >
         {label}
       </Link>
@@ -87,7 +88,7 @@ const Header = () => {
           
           {/* Desktop Navigation */}
           <div className="hidden md:block">
-            <div className="flex items-center space-x-8">
+            <div className="flex items-center space-x-8" role="navigation" aria-label="Main navigation">
               {renderNavLink('/', 'Home')}
 
               {loading ? (
@@ -110,7 +111,9 @@ const Header = () => {
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-gray-300 hover:text-white transition-colors"
-              aria-label="Toggle menu"
+              aria-label="Toggle navigation menu"
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-menu"
             >
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 {mobileMenuOpen ? (
@@ -125,7 +128,7 @@ const Header = () => {
 
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-gray-700/30 backdrop-blur-sm">
+          <div id="mobile-menu" className="md:hidden border-t border-gray-700/30 backdrop-blur-sm" role="navigation" aria-label="Mobile navigation">
             <div className="px-2 pt-2 pb-3 space-y-1">
               {renderNavLink('/', 'Home', true)}
 

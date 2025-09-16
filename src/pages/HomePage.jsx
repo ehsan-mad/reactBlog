@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { postsService } from '../services/api.js'
-import PostCard from '../components/ui/PostCard.jsx'
+import PostCard from '../components/common/PostCard.jsx'
 import { LoadingPage, LoadingCard, SkeletonCard } from '../components/ui/LoadingSpinner.jsx'
 import ErrorMessage from '../components/ui/ErrorMessage.jsx'
 import Button from '../components/ui/Button.jsx'
@@ -117,7 +117,7 @@ const HomePage = () => {
                   // Actual posts
                   posts.map((post, index) => (
                     <div key={post.id} className="opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]" style={{ animationDelay: `${index * 0.1}s` }}>
-                      <PostCard post={post} />
+                      <PostCard post={post} variant="default" />
                     </div>
                   ))
                 )}

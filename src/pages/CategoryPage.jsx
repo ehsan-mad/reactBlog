@@ -1,6 +1,6 @@
 import React from 'react'
 import { useParams } from 'react-router-dom'
-import PostCard from '../components/ui/PostCard.jsx'
+import PostCard from '../components/common/PostCard.jsx'
 import { SkeletonCard } from '../components/ui/LoadingSpinner.jsx'
 import { ErrorPage } from '../components/ui/ErrorMessage.jsx'
 import Button from '../components/ui/Button.jsx'
@@ -98,7 +98,7 @@ const CategoryPage = () => {
               {/* Posts Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
                 {posts.map((post) => (
-                  <PostCard key={post.id} post={post} />
+                  <PostCard key={post.id} post={post} variant="default" />
                 ))}
                 
                 {/* Loading cards for load more */}

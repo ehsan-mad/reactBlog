@@ -128,4 +128,11 @@ const PostCard = ({ post, className = '', variant = 'default' }) => {
   )
 }
 
-export default PostCard
+// Use React.memo to avoid unnecessary re-renders when props haven't changed
+export default React.memo(PostCard, (prevProps, nextProps) => {
+  return (
+    prevProps.post.id === nextProps.post.id &&
+    prevProps.variant === nextProps.variant &&
+    prevProps.className === nextProps.className
+  );
+});
