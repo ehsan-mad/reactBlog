@@ -10,7 +10,7 @@ export default defineConfig({
         manualChunks: {
           vendor: ['react', 'react-dom'],
           router: ['react-router-dom'],
-          markdown: ['marked', 'dompurify']
+          markdown: ['react-markdown', 'dompurify']
         }
       }
     }
